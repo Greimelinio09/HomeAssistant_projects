@@ -3,6 +3,7 @@ import time
 import paho.mqtt.client as mqtt
 from math import pi
 
+# MQTT Konfiguration
 MQTT_BROKER = "10.0.0.68"
 MQTT_PORT = 1883
 MQTT_DISTANCE = "zisterne/pi/outdoor/distance"
@@ -11,33 +12,27 @@ MQTT_PERCENTAGE = "zisterne/pi/outdoor/percentage"
 MQTT_USER = "mqtt"
 MQTT_PASS = "mqtt"
 
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-client.username_pw_set(MQTT_USER, MQTT_PASS)
-client.connect(MQTT_BROKER, MQTT_PORT)
+# Zeit-Konfiguration
+MEASURE_INTERVAL = 5        # Alle 5 Sekunden messen
+SEND_INTERVAL = 15 * 60     # Alle 15 Minuten senden (900 Sekunden)
 
+# Hardware-Setup
 Triggerpin = 18
 Echopin = 24
-
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(Triggerpin, GPIO.OUT)
 GPIO.setup(Echopin, GPIO.IN)
 
-# Zisterne definieren
+# Zisterne Definition
 ZISTERNE_DURCHMESSER = 2.5
-
-# 2000mm bis zum Ablauf 2640mm ist der Sensor vom Boden entfernt
 ZISTERNE_MAX_WATER_HIGHT = 2
-
-# Sensor Hoehe ueber Boden
 ZISTERNE_SENSOR_HIGHT = 2.64
 
-# DEFINE AVERAGE Rounds for Distance measurement
-AVERAGE_ROUNDS = 70
-
-
+# MQTT Client Setup
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+client.username_pw_set(MQTT_USER, MQTT_PASS)
 
 def distanz():
-    # Trigger auf HIGH setzen
     GPIO.output(Triggerpin, True)
     time.sleep(0.00001)
     GPIO.output(Triggerpin, False)
@@ -45,72 +40,73 @@ def distanz():
     start_zeit = time.time()
     stop_zeit = time.time()
 
-    # Startzeit speichern
     while GPIO.input(Echopin) == 0:
         start_zeit = time.time()
-
-    # Stopzeit speichern
     while GPIO.input(Echopin) == 1:
         stop_zeit = time.time()
 
-    # Zeitdifferenz
     zeit_differenz = stop_zeit - start_zeit
-
-    # Schallgeschwindigkeit (34300 cm/s) * Zeit / 2
     entfernung = (zeit_differenz * 34300) / 2
-
     return entfernung
 
-def getwater(distance):
+def calculate_values(avg_distance):
+    # Berechnung der Liter und Prozent basierend auf dem Mittelwert
     wassermenge_max = ZISTERNE_DURCHMESSER * ZISTERNE_DURCHMESSER * pi * ZISTERNE_MAX_WATER_HIGHT * 1000 / 4
-    zisterne_inhalt = ZISTERNE_DURCHMESSER * ZISTERNE_DURCHMESSER * pi * (ZISTERNE_SENSOR_HIGHT - distance / 100) * 1000 / 4
-    voll_in_prozent = zisterne_inhalt / wassermenge_max * 100
-
-    # print ("MAX = %.1f Liter, Aktuell = %.1f Liter, Gefuellt = %.1f Prozent" % ( wassermenge_max, zisterne_inhalt, voll_in_prozent))
-
-    if zisterne_inhalt > 200 and zisterne_inhalt < 11000:
-        print("MAX = %.1f Liter" % wassermenge_max)
-        print("Aktuell = %.1f Liter" % zisterne_inhalt)
-        print("Gefuellt = %.1f Prozent" % voll_in_prozent)
-        return zisterne_inhalt
-    else:
-        print("Wrong reading")
-        return 0
-
-def getpercentage(distance):
-    wassermenge_max = ZISTERNE_DURCHMESSER * ZISTERNE_DURCHMESSER * pi * ZISTERNE_MAX_WATER_HIGHT * 1000 / 4
-    zisterne_inhalt = ZISTERNE_DURCHMESSER * ZISTERNE_DURCHMESSER * pi * (ZISTERNE_SENSOR_HIGHT - distance / 100) * 1000 / 4
-    voll_in_prozent = zisterne_inhalt / wassermenge_max * 100
-
-    # print ("MAX = %.1f Liter, Aktuell = %.1f Liter, Gefuellt = %.1f Prozent" % ( wassermenge_max, zisterne_inhalt, voll_in_prozent))
-
-    if zisterne_inhalt > 200 and zisterne_inhalt < 11000:
-        print("MAX = %.1f Liter" % wassermenge_max)
-        print("Aktuell = %.1f Liter" % zisterne_inhalt)
-        print("Gefuellt = %.1f Prozent" % voll_in_prozent)
-        return voll_in_prozent
-    else:
-        print("Wrong reading")
-        return 0
+    zisterne_inhalt = ZISTERNE_DURCHMESSER * ZISTERNE_DURCHMESSER * pi * (ZISTERNE_SENSOR_HIGHT - avg_distance / 100) * 1000 / 4
+    voll_in_prozent = (zisterne_inhalt / wassermenge_max) * 100
+    
+    return zisterne_inhalt, voll_in_prozent, wassermenge_max
 
 def sendmqtt(distance, waterlevel, percentage):
-    client.publish(MQTT_DISTANCE, distance, retain=True)
-    client.publish(MQTT_WATERLEVEL, waterlevel, retain=True)
-    client.publish(MQTT_PERCENTAGE, percentage, retain=True)
+    try:
+        client.connect(MQTT_BROKER, MQTT_PORT)
+        client.publish(MQTT_DISTANCE, round(distance, 2), retain=True)
+        client.publish(MQTT_WATERLEVEL, round(waterlevel, 1), retain=True)
+        client.publish(MQTT_PERCENTAGE, round(percentage, 1), retain=True)
+        client.disconnect()
+        print("--- Daten erfolgreich gesendet ---")
+    except Exception as e:
+        print(f"MQTT Fehler: {e}")
 
 if __name__ == '__main__':
+    messwerte = []
+    letzter_send_zeitpunkt = time.time()
+    
+    print("Messung gestartet. Sammle Daten für 15 Minuten...")
+
     try:
         while True:
-            distance = distanz()
-            waterlevel = getwater(distance)
-            percentage = getpercentage(distance)
+            # 1. Einzelmessung durchführen
+            aktuelle_distanz = distanz()
+            
+            # Optional: Extrem falsche Sensorwerte (z.B. < 0) direkt ignorieren
+            if aktuelle_distanz > 0:
+                messwerte.append(aktuelle_distanz)
+            
+            # 2. Prüfen, ob 15 Minuten vergangen sind
+            jetzt = time.time()
+            if jetzt - letzter_send_zeitpunkt >= SEND_INTERVAL:
+                if messwerte:
+                    # Mittelwert der Distanz berechnen
+                    avg_dist = sum(messwerte) / len(messwerte)
+                    
+                    # Berechnungen durchführen
+                    liter, prozent, max_liter = calculate_values(avg_dist)
+                    
+                    # Validierung wie im Originalsketch
+                    if 200 < liter < 11000:
+                        print(f"Mittelwert Distanz (n={len(messwerte)}): {avg_dist:.2f} cm")
+                        print(f"Aktuell: {liter:.1f} L ({prozent:.1f}%)")
+                        sendmqtt(avg_dist, liter, prozent)
+                    else:
+                        print(f"Mittelwert ungültig ({liter:.1f} L). Sende nichts.")
+                
+                # Liste leeren und Timer zurücksetzen
+                messwerte = []
+                letzter_send_zeitpunkt = jetzt
 
-            print(f"Gemessene Entfernung: {distance:.1f} cm")
-
-            if waterlevel != 0:
-                sendmqtt(distance, waterlevel, percentage)
-
-            time.sleep(5)
+            # 3. 5 Sekunden warten bis zur nächsten Messung
+            time.sleep(MEASURE_INTERVAL)
 
     except KeyboardInterrupt:
         print("Messung beendet")
