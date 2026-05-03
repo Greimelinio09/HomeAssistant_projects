@@ -3,6 +3,7 @@ import time
 import paho.mqtt.client as mqtt
 from math import pi
 
+# ---------------- MQTT ----------------
 MQTT_BROKER = "10.0.0.68"
 MQTT_PORT = 1883
 MQTT_DISTANCE = "zisterne/pi/outdoor/distance"
@@ -14,7 +15,9 @@ MQTT_PASS = "mqtt"
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 client.username_pw_set(MQTT_USER, MQTT_PASS)
 client.connect(MQTT_BROKER, MQTT_PORT)
+client.loop_start()
 
+# ---------------- GPIO ----------------
 Triggerpin = 18
 Echopin = 24
 
@@ -22,92 +25,110 @@ GPIO.setmode(GPIO.BCM)
 GPIO.setup(Triggerpin, GPIO.OUT)
 GPIO.setup(Echopin, GPIO.IN)
 
-# Zisterne definieren
+GPIO.output(Triggerpin, False)
+
+# ---------------- Zisterne ----------------
 ZISTERNE_DURCHMESSER = 2.5
-
-# 2000mm bis zum Ablauf 2640mm ist der Sensor vom Boden entfernt
 ZISTERNE_MAX_WATER_HIGHT = 2
-
-# Sensor Hoehe ueber Boden
 ZISTERNE_SENSOR_HIGHT = 2.64
 
-# DEFINE AVERAGE Rounds for Distance measurement
-AVERAGE_ROUNDS = 70
+# ---------------- CONFIG ----------------
+TIMEOUT = 0.03  # 30ms
+SAMPLES = 10    # weniger als 70 → stabiler!
 
-
-
+# ---------------- DISTANZ ----------------
 def distanz():
-    # Trigger auf HIGH setzen
+    GPIO.output(Triggerpin, False)
+    time.sleep(0.0002)
+
     GPIO.output(Triggerpin, True)
     time.sleep(0.00001)
     GPIO.output(Triggerpin, False)
 
-    start_zeit = time.time()
-    stop_zeit = time.time()
+    timeout_start = time.time()
 
-    # Startzeit speichern
+    # warten bis Echo HIGH wird
     while GPIO.input(Echopin) == 0:
-        start_zeit = time.time()
+        start = time.time()
+        if time.time() - timeout_start > TIMEOUT:
+            return -1
 
-    # Stopzeit speichern
+    timeout_start = time.time()
+
+    # warten bis Echo LOW wird
     while GPIO.input(Echopin) == 1:
-        stop_zeit = time.time()
+        stop = time.time()
+        if time.time() - timeout_start > TIMEOUT:
+            return -1
 
-    # Zeitdifferenz
-    zeit_differenz = stop_zeit - start_zeit
+    duration = stop - start
+    distance = (duration * 34300) / 2
 
-    # Schallgeschwindigkeit (34300 cm/s) * Zeit / 2
-    entfernung = (zeit_differenz * 34300) / 2
+    return distance
 
-    return entfernung
+# ---------------- FILTERED DISTANCE ----------------
+def get_distance_filtered():
+    values = []
 
+    for _ in range(SAMPLES):
+        d = distanz()
+        if d > 0 and d < 500:   # Filter für Zisterne
+            values.append(d)
+        time.sleep(0.05)
+
+    if len(values) == 0:
+        return -1
+
+    return sum(values) / len(values)
+
+# ---------------- VOLUME ----------------
 def getwater(distance):
-    wassermenge_max = ZISTERNE_DURCHMESSER * ZISTERNE_DURCHMESSER * pi * ZISTERNE_MAX_WATER_HIGHT * 1000 / 4
-    zisterne_inhalt = ZISTERNE_DURCHMESSER * ZISTERNE_DURCHMESSER * pi * (ZISTERNE_SENSOR_HIGHT - distance / 100) * 1000 / 4
-    voll_in_prozent = zisterne_inhalt / wassermenge_max * 100
+    if distance <= 0:
+        return 0
 
-    # print ("MAX = %.1f Liter, Aktuell = %.1f Liter, Gefuellt = %.1f Prozent" % ( wassermenge_max, zisterne_inhalt, voll_in_prozent))
+    wassermenge_max = ZISTERNE_DURCHMESSER**2 * pi * ZISTERNE_MAX_WATER_HIGHT * 1000 / 4
+    zisterne_inhalt = ZISTERNE_DURCHMESSER**2 * pi * (ZISTERNE_SENSOR_HIGHT - distance / 100) * 1000 / 4
 
-    if zisterne_inhalt > 200 and zisterne_inhalt < 11000:
-        print("MAX = %.1f Liter" % wassermenge_max)
-        print("Aktuell = %.1f Liter" % zisterne_inhalt)
-        print("Gefuellt = %.1f Prozent" % voll_in_prozent)
-        return zisterne_inhalt
-    else:
+    if zisterne_inhalt < 200 or zisterne_inhalt > 11000:
         print("Wrong reading")
         return 0
 
+    return zisterne_inhalt
+
+# ---------------- PERCENT ----------------
 def getpercentage(distance):
-    wassermenge_max = ZISTERNE_DURCHMESSER * ZISTERNE_DURCHMESSER * pi * ZISTERNE_MAX_WATER_HIGHT * 1000 / 4
-    zisterne_inhalt = ZISTERNE_DURCHMESSER * ZISTERNE_DURCHMESSER * pi * (ZISTERNE_SENSOR_HIGHT - distance / 100) * 1000 / 4
-    voll_in_prozent = zisterne_inhalt / wassermenge_max * 100
-
-    # print ("MAX = %.1f Liter, Aktuell = %.1f Liter, Gefuellt = %.1f Prozent" % ( wassermenge_max, zisterne_inhalt, voll_in_prozent))
-
-    if zisterne_inhalt > 200 and zisterne_inhalt < 11000:
-        print("MAX = %.1f Liter" % wassermenge_max)
-        print("Aktuell = %.1f Liter" % zisterne_inhalt)
-        print("Gefuellt = %.1f Prozent" % voll_in_prozent)
-        return voll_in_prozent
-    else:
-        print("Wrong reading")
+    if distance <= 0:
         return 0
 
+    wassermenge_max = ZISTERNE_DURCHMESSER**2 * pi * ZISTERNE_MAX_WATER_HIGHT * 1000 / 4
+    zisterne_inhalt = ZISTERNE_DURCHMESSER**2 * pi * (ZISTERNE_SENSOR_HIGHT - distance / 100) * 1000 / 4
+
+    return (zisterne_inhalt / wassermenge_max) * 100
+
+# ---------------- MQTT ----------------
 def sendmqtt(distance, waterlevel, percentage):
     client.publish(MQTT_DISTANCE, distance, retain=True)
     client.publish(MQTT_WATERLEVEL, waterlevel, retain=True)
     client.publish(MQTT_PERCENTAGE, percentage, retain=True)
 
+# ---------------- MAIN ----------------
 if __name__ == '__main__':
     try:
         while True:
-            distance = distanz()
+
+            distance = get_distance_filtered()
+
+            if distance == -1:
+                print("No valid echo")
+                time.sleep(2)
+                continue
+
             waterlevel = getwater(distance)
             percentage = getpercentage(distance)
 
-            print(f"Gemessene Entfernung: {distance:.1f} cm")
+            print(f"Distanz: {distance:.1f} cm")
 
-            if waterlevel != 0:
+            if waterlevel > 0:
                 sendmqtt(distance, waterlevel, percentage)
 
             time.sleep(5)
@@ -115,3 +136,4 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         print("Messung beendet")
         GPIO.cleanup()
+        client.loop_stop()
