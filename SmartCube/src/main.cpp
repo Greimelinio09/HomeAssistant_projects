@@ -25,15 +25,12 @@ PubSubClient client(espClient);
 
 unsigned long startTime = 0;
 
-void sendmqtt();
+void sendmqtt(int surface);
 void getdata();
+int getsurface();
 
 void setup() {
   Serial.begin(115200);
-  for(int i = 0; i < 5; i++) {
-    Serial.println("Hello World!");
-    delay(1000);
-  }
   startTime = millis();
   Wire.begin();
   // Wake up MPU6050: write 0 to PWR_MGMT_1 (0x6B)
@@ -48,20 +45,25 @@ void setup() {
 }
 
 void loop() {
-  
+  static unsigned long lastsurfaceTime = 0;
   getdata();
-  sendmqtt();
+  static int surface;
+  if(millis() - lastsurfaceTime > 1000) {
+    surface = getsurface();
+    lastsurfaceTime = millis();
+  }
+  sendmqtt(surface);
 
 }
 
-void sendmqtt() {
+void sendmqtt(int surface) {
   if (!client.connected()) {
     while (!client.connect("ESP32Client", mqttusername, mqttpassword)) {
       delay(500);
     }
   }
   unsigned long currentTime = millis();
-  
+  client.publish(MQTT_Surface, String(surface).c_str());
   
 }
 
@@ -85,6 +87,36 @@ void getdata() {
   Serial.println("Accel: " + String(AcX) + ", " + String(AcY) + ", " + String(AcZ));
   Serial.println("Gyro: " + String(GyX) + ", " + String(GyY) + ", " + String(GyZ));
   Serial.println();
-  delay(1000);
+  
+
+}
+
+int getsurface() {
+   
+  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.write(0x3B);
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU6050_ADDR, 14, true);
+
+  int16_t AcX = Wire.read() << 8 | Wire.read();
+  int16_t AcY = Wire.read() << 8 | Wire.read();
+  int16_t AcZ = Wire.read() << 8 | Wire.read();
+
+  if (AcZ > 15000) {
+    return 1; // Surface up
+  } else if (AcZ < -15000) {
+    return 6; // Surface down
+  } else if (AcX > 15000) {
+    return 2; // Surface right
+  } else if (AcX < -15000) {
+    return 5; // Surface left
+  } else if (AcY > 15000) {
+    return 3; // Surface front
+  } else if (AcY < -15000) {
+    return 4; // Surface back
+  } else {
+    return 1; // No significant orientation
+    
+  }
 
 }
