@@ -28,16 +28,14 @@ unsigned long startTime = 0;
 void sendmqtt(int surface);
 void getdata();
 int getsurface();
+void writeRegister(uint8_t reg, uint8_t value);
 
 void setup() {
   Serial.begin(115200);
   startTime = millis();
   Wire.begin();
-  // Wake up MPU6050: write 0 to PWR_MGMT_1 (0x6B)
-  Wire.beginTransmission(MPU6050_ADDR);
-  Wire.write(0x6B);
-  Wire.write(0x00);
-  Wire.endTransmission();
+  writeRegister(0x6B, 0x00); // Wake up MPU6050
+  writeRegister(0x38, 0b0100000); // Enable I2C bypass
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) delay(500);
   Serial.println("Connected to WiFi");
@@ -119,4 +117,12 @@ int getsurface() {
     
   }
 
+}
+
+
+void writeRegister(uint8_t reg, uint8_t value) {
+  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.write(reg);
+  Wire.write(value);
+  Wire.endTransmission();
 }
