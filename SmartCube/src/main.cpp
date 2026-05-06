@@ -2,20 +2,22 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
+#include <secrets.h>
+
 
 
 #define MPU6050_ADDR 0x68
 
 
-const char* ssid = "LIONS_HOME_OG";
-const char* password = "68133733";
+const char* ssid = SECRET_SSID;
+const char* password = SECRET_PASSWORD;
 
 
-const char* MQTT_Adress = "10.0.0.68";
-const int MQTT_Port = 1883;
+const char* MQTT_Adress = SECRET_MQTT_ADRESS;
+const int MQTT_Port = SECRET_MQTT_PORT;
 
-const char* mqttusername = "mqtt";
-const char* mqttpassword = "mqtt";
+const char* mqttusername = SECRET_MQTT_USERNAME;
+const char* mqttpassword = SECRET_MQTT_PASSWORD;
 
 const char* MQTT_Surface = "home/livingroom/smartcube/surface";
 const char* MQTT_Shaking = "home/livingroom/smartcube/shaking";
@@ -36,8 +38,10 @@ void setup() {
   startTime = millis();
   Wire.begin();
   writeRegister(0x6B, 0x00); // Wake up MPU6050
-  writeRegister(0x38, 0x40); // Enable interrupt for data ready
-  writeRegister(0x1f, 0x14); // set filter to 40mg
+  
+  
+
+
   
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) delay(500);
