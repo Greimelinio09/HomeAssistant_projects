@@ -25,9 +25,10 @@ PubSubClient client(espClient);
 
 unsigned long startTime = 0;
 
-void sendmqtt(int surface);
+void sendmqtt(int surface, String shaking);
 void getdata();
 int getsurface();
+bool getshake();
 void writeRegister(uint8_t reg, uint8_t value);
 
 void setup() {
@@ -35,7 +36,9 @@ void setup() {
   startTime = millis();
   Wire.begin();
   writeRegister(0x6B, 0x00); // Wake up MPU6050
-  writeRegister(0x38, 0b0100000); // Enable I2C bypass
+  writeRegister(0x38, 0x40); // Enable interrupt for data ready
+  writeRegister(0x1f, 0x14); // set filter to 40mg
+  
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) delay(500);
   Serial.println("Connected to WiFi");
@@ -44,25 +47,42 @@ void setup() {
 
 void loop() {
   static unsigned long lastsurfaceTime = 0;
-  getdata();
+  static unsigned long lastshakeTime = 0;
   static int surface;
+  bool lastshake = false;
+
+  //getdata();
+
   if(millis() - lastsurfaceTime > 1000) {
     surface = getsurface();
+    sendmqtt(surface, "Ruhig");
     lastsurfaceTime = millis();
   }
-  sendmqtt(surface);
+  bool isshaked = getshake();
+  if(isshaked != lastshake) 
+    {
+      if(isshaked) 
+        {
+          sendmqtt(surface, "Geschüttelt");
+        }
+      else 
+        {
+          sendmqtt(surface, "Ruhig");
+        }
+    }
+  lastshake = isshaked;
+  }
 
-}
-
-void sendmqtt(int surface) {
+void sendmqtt(int surface, String shaking) {
   if (!client.connected()) {
     while (!client.connect("ESP32Client", mqttusername, mqttpassword)) {
       delay(500);
     }
   }
-  unsigned long currentTime = millis();
-  client.publish(MQTT_Surface, String(surface).c_str());
   
+  client.publish(MQTT_Surface, String(surface).c_str());
+  client.publish(MQTT_Shaking, shaking.c_str());
+
 }
 
 void getdata() {
@@ -125,4 +145,90 @@ void writeRegister(uint8_t reg, uint8_t value) {
   Wire.write(reg);
   Wire.write(value);
   Wire.endTransmission();
+}
+
+bool getshake() {
+  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.write(0x3B);
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU6050_ADDR, 14, true);
+
+  int16_t AcX = Wire.read() << 8 | Wire.read();
+  int16_t AcY = Wire.read() << 8 | Wire.read();
+  int16_t AcZ = Wire.read() << 8 | Wire.read();
+
+  static int16_t AcXold = 0;
+  static int16_t AcYold = 0;
+
+  static unsigned long lastShakeTime = 0;
+  static int shakenumber = 0;
+
+  int16_t deltax = AcX - AcXold;
+  int16_t deltay = AcY - AcYold;
+
+  bool xpos = false;
+  bool ypos = false;
+  bool xneg = false;
+  bool yneg = false;
+
+  if(deltax > 20000 && xpos == false || deltay > 20000 && ypos == false || deltay < -20000 && yneg == false || deltay < -20000 && yneg == false) 
+    {
+      lastShakeTime = millis();
+      if(deltax > 20000) 
+        {
+          xpos = true;
+        }
+      else
+        {
+          xpos = false;
+        }
+      if(deltay > 20000) 
+        {
+          ypos = true;
+        }
+      else
+        {
+          ypos = false;
+        }
+      if(deltax < -20000) 
+        {
+          xneg = true;
+        }
+      else
+        {
+          xneg = false;
+        }
+      if(deltay < -20000) 
+        {
+          yneg = true;
+        }
+      else
+        {
+          yneg = false;
+        }
+    }
+  
+  if(millis() - lastShakeTime > 200) 
+    {
+      shakenumber = 0;
+      xpos = false;
+      ypos = false;
+      xneg = false;
+      yneg = false;
+    }
+  else
+    {
+      shakenumber++;
+    }
+
+    if(shakenumber > 5) 
+    {
+      return true;
+    }
+    else 
+    {
+      return false;
+    }
+
+
 }
