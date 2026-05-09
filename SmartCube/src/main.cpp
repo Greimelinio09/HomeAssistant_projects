@@ -30,7 +30,7 @@ void getdata();
 int getsurface();
 bool getshake();
 void writeRegister(uint8_t reg, uint8_t value);
-void startdeepsleeptimer() {
+void startdeepsleeptimer(int surface) {
   // Calculate the time until the next full minute
   static unsigned long currentTime = millis();
 
@@ -47,6 +47,11 @@ void startdeepsleeptimer() {
       esp_deep_sleep_enable_gpio_wakeup(BIT(INT_PIN),ESP_GPIO_WAKEUP_GPIO_HIGH);
     }
     currentTime = millis();
+    if(surface != 0)
+      {
+        sendmqtt(surface, "Ruhig");
+      }
+    
     esp_deep_sleep_start();
   }
   
@@ -60,8 +65,32 @@ void setup() {
   pinMode(INT_PIN, INPUT_PULLUP);
   Wire.begin();
   writeRegister(0x6B, 0x00); // Wake up MPU6050
+  const unsigned long wifistarttime = millis();
+  int counter = 0;
   WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) delay(500);
+  while (WiFi.status() != WL_CONNECTED)
+    {
+      delay(500);
+      if(millis() - wifistarttime > 10000) 
+        {
+          if(counter == 0) 
+            {
+              WiFi.begin(SECRET_SSID1, SECRET_PASSWORD1);
+              counter++;
+            }
+          else if(counter == 1) 
+            {
+              WiFi.begin(SECRET_SSID2, SECRET_PASSWORD2);
+              counter++;
+            }
+          else 
+            {
+              Serial.println("Could not connect to WiFi");
+              startdeepsleeptimer(0);
+              break;
+            }
+        }
+    } 
   Serial.println("Connected to WiFi");
   client.setServer(MQTT_Adress, MQTT_Port);
   
@@ -72,8 +101,7 @@ void loop() {
   static unsigned long lastshakeTime = 0;
   static int surface;
   bool lastshake = false;
-  startdeepsleeptimer();
-
+  
   //getdata();
 
   if(millis() - lastsurfaceTime > 1000) {
@@ -94,6 +122,8 @@ void loop() {
         }
     }
   lastshake = isshaked;
+  startdeepsleeptimer(surface);
+
   }
 
 void sendmqtt(int surface, String shaking) {
