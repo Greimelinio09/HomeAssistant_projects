@@ -7,8 +7,8 @@
 #define MPU6050_ADDR 0x68
 #define INT_PIN 2
 
-const char* ssid = SECRET_SSID;
-const char* password = SECRET_PASSWORD;
+char* ssid = SECRET_SSID;
+char* password = SECRET_PASSWORD;
 
 
 const char* MQTT_Adress = SECRET_MQTT_ADRESS;
@@ -30,6 +30,8 @@ void getdata();
 int getsurface();
 bool getshake();
 void writeRegister(uint8_t reg, uint8_t value);
+void getavailablewifi();
+ 
 void startdeepsleeptimer(int surface) {
   // Calculate the time until the next full minute
   static unsigned long currentTime = millis();
@@ -65,33 +67,9 @@ void setup() {
   pinMode(INT_PIN, INPUT_PULLUP);
   Wire.begin();
   writeRegister(0x6B, 0x00); // Wake up MPU6050
-  const unsigned long wifistarttime = millis();
-  int counter = 0;
   WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED)
-    {
-      delay(500);
-      if(millis() - wifistarttime > 10000) 
-        {
-          if(counter == 0) 
-            {
-              WiFi.begin(SECRET_SSID1, SECRET_PASSWORD1);
-              counter++;
-            }
-          else if(counter == 1) 
-            {
-              WiFi.begin(SECRET_SSID2, SECRET_PASSWORD2);
-              counter++;
-            }
-          else 
-            {
-              Serial.println("Could not connect to WiFi");
-              startdeepsleeptimer(0);
-              break;
-            }
-        }
-    } 
-  Serial.println("Connected to WiFi");
+  getavailablewifi();
+    Serial.println("Connected to WiFi");
   client.setServer(MQTT_Adress, MQTT_Port);
   
 }
@@ -286,3 +264,42 @@ bool getshake() {
 
 }
 
+void getavailablewifi() {
+  const unsigned long wifistarttime = millis();
+   int counter = 0;
+  while (WiFi.status() != WL_CONNECTED)
+    {
+      delay(500);
+      if(millis() - wifistarttime > 10000) 
+        {
+          if(counter == 0) 
+            {
+              WiFi.begin(SECRET_SSID, SECRET_PASSWORD);
+              ssid = SECRET_SSID;
+              password = SECRET_PASSWORD;
+              counter++;
+            }
+          else if(counter == 1) 
+            {
+              WiFi.begin(SECRET_SSID1, SECRET_PASSWORD1);
+              ssid = SECRET_SSID1;
+              password = SECRET_PASSWORD1;
+              counter++;
+            }
+          else if (counter == 2)
+          {
+            WiFi.begin(SECRET_SSID2, SECRET_PASSWORD2);
+            ssid = SECRET_SSID2;
+            password = SECRET_PASSWORD2;
+            counter++;
+          }
+          
+          else 
+            {
+              Serial.println("Could not connect to WiFi");
+              startdeepsleeptimer(0);
+              break;
+            }
+        }
+    } 
+}
