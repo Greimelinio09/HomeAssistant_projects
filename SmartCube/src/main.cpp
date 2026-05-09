@@ -4,10 +4,8 @@
 #include <PubSubClient.h>
 #include <secrets.h>
 
-
-
 #define MPU6050_ADDR 0x68
-
+#define INT_PIN 2
 
 const char* ssid = SECRET_SSID;
 const char* password = SECRET_PASSWORD;
@@ -32,21 +30,41 @@ void getdata();
 int getsurface();
 bool getshake();
 void writeRegister(uint8_t reg, uint8_t value);
+void startdeepsleeptimer() {
+  // Calculate the time until the next full minute
+  static unsigned long currentTime = millis();
+
+  if(millis() - currentTime > 10000) {
+
+    bool state = digitalRead(INT_PIN); // The following lines will make the ESP go out of a deep sleep on toggle
+
+    if(state == HIGH) 
+    {
+      esp_deep_sleep_enable_gpio_wakeup(BIT(INT_PIN),ESP_GPIO_WAKEUP_GPIO_LOW);
+    } 
+    else 
+    {
+      esp_deep_sleep_enable_gpio_wakeup(BIT(INT_PIN),ESP_GPIO_WAKEUP_GPIO_HIGH);
+    }
+    currentTime = millis();
+    esp_deep_sleep_start();
+  }
+  
+
+
+}
 
 void setup() {
   Serial.begin(115200);
   startTime = millis();
+  pinMode(INT_PIN, INPUT_PULLUP);
   Wire.begin();
   writeRegister(0x6B, 0x00); // Wake up MPU6050
-  
-  
-
-
-  
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) delay(500);
   Serial.println("Connected to WiFi");
   client.setServer(MQTT_Adress, MQTT_Port);
+  
 }
 
 void loop() {
@@ -54,6 +72,7 @@ void loop() {
   static unsigned long lastshakeTime = 0;
   static int surface;
   bool lastshake = false;
+  startdeepsleeptimer();
 
   //getdata();
 
@@ -236,3 +255,4 @@ bool getshake() {
 
 
 }
+
