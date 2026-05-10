@@ -179,57 +179,91 @@ void writeRegister(uint8_t reg, uint8_t value) {
 }
 
 bool getshake() {
-
   Wire.beginTransmission(MPU6050_ADDR);
   Wire.write(0x3B);
   Wire.endTransmission(false);
-
-  Wire.requestFrom(MPU6050_ADDR, 6, true);
+  Wire.requestFrom(MPU6050_ADDR, 14, true);
 
   int16_t AcX = Wire.read() << 8 | Wire.read();
   int16_t AcY = Wire.read() << 8 | Wire.read();
   int16_t AcZ = Wire.read() << 8 | Wire.read();
 
-  static int16_t oldX = 0;
-  static int16_t oldY = 0;
-  static int16_t oldZ = 0;
+  static int16_t AcXold = 0;
+  static int16_t AcYold = 0;
 
-  static unsigned long lastPeak = 0;
-  static bool shaking = false;
-  static int peaks = 0;
+  static unsigned long lastShakeTime = 0;
+  static int shakenumber = 0;
 
-  int dx = AcX - oldX;
-  int dy = AcY - oldY;
-  int dz = AcZ - oldZ;
+  int16_t deltax = AcX - AcXold;
+  int16_t deltay = AcY - AcYold;
 
-  oldX = AcX;
-  oldY = AcY;
-  oldZ = AcZ;
+  bool xpos = false;
+  bool ypos = false;
+  bool xneg = false;
+  bool yneg = false;
 
-  int movement = abs(dx) + abs(dy) + abs(dz);
-
-  // Bewegung erkannt
-  if (movement > 12000) {
-
-    if (millis() - lastPeak > 80) {
-      peaks++;
-      lastPeak = millis();
+  if(deltax > 20000 && xpos == false || deltay > 20000 && ypos == false || deltay < -20000 && yneg == false || deltay < -20000 && yneg == false) 
+    {
+      lastShakeTime = millis();
+      if(deltax > 20000) 
+        {
+          xpos = true;
+        }
+      else
+        {
+          xpos = false;
+        }
+      if(deltay > 20000) 
+        {
+          ypos = true;
+        }
+      else
+        {
+          ypos = false;
+        }
+      if(deltax < -20000) 
+        {
+          xneg = true;
+        }
+      else
+        {
+          xneg = false;
+        }
+      if(deltay < -20000) 
+        {
+          yneg = true;
+        }
+      else
+        {
+          yneg = false;
+        }
+    }
+  
+  if(millis() - lastShakeTime > 200) 
+    {
+      shakenumber = 0;
+      xpos = false;
+      ypos = false;
+      xneg = false;
+      yneg = false;
+    }
+  else
+    {
+      shakenumber++;
     }
 
-    // Mehrere Peaks = Schütteln aktiv
-    if (peaks >= 4) {
-      shaking = true;
+    if(shakenumber > 5) 
+    {
+      return true;
     }
-  }
+    else 
+    {
+      return false;
+    }
 
-  // Wenn 1 Sekunde keine starke Bewegung
-  if (millis() - lastPeak > 1000) {
-    shaking = false;
-    peaks = 0;
-  }
 
-  return shaking;
 }
+
 void getavailablewifi() {
   const unsigned long wifistarttime = millis();
    int counter = 0;
