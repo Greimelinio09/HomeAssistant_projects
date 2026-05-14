@@ -17,8 +17,8 @@ const int MQTT_Port = SECRET_MQTT_PORT;
 const char* mqttusername = SECRET_MQTT_USERNAME;
 const char* mqttpassword = SECRET_MQTT_PASSWORD;
 
-const char* MQTT_Surface = "home/livingroom/smartcube/surface1";
-const char* MQTT_Shaking = "home/livingroom/smartcube/shaking1";
+const char* MQTT_Surface = "home/livingroom/smartcube/surface";
+const char* MQTT_Shaking = "home/livingroom/smartcube/shaking";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -113,7 +113,7 @@ void loop() {
     }
   }
   
-  //startdeepsleeptimer(surface);
+  startdeepsleeptimer(surface);
 
   }
 
@@ -221,8 +221,10 @@ bool getshake() {
 
   int oldamplitude = sqrt(sq(lastAcX) + sq(lastAcY) + sq(lastAcZ));
   int amplitude = sqrt(sq(AcX) + sq(AcY) + sq(AcZ));
-   Serial.print(">");
+   
 
+  /*
+  Serial.print(">");
   Serial.print("amplitude:");
   Serial.print(amplitude);
   Serial.print(",");
@@ -234,7 +236,7 @@ bool getshake() {
   Serial.print("border");
   Serial.print(1000000);
   Serial.println(" ");
-  
+  */
 
   
 
