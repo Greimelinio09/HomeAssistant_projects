@@ -7,8 +7,8 @@
 #define MPU6050_ADDR 0x68
 #define INT_PIN 2
 
-char* ssid = SECRET_SSID;
-char* password = SECRET_PASSWORD;
+RTC_DATA_ATTR char* ssid = SECRET_SSID;
+RTC_DATA_ATTR char* password = SECRET_PASSWORD;
 
 
 const char* MQTT_Adress = SECRET_MQTT_ADRESS;
@@ -17,8 +17,8 @@ const int MQTT_Port = SECRET_MQTT_PORT;
 const char* mqttusername = SECRET_MQTT_USERNAME;
 const char* mqttpassword = SECRET_MQTT_PASSWORD;
 
-const char* MQTT_Surface = "home/livingroom/smartcube/surface";
-const char* MQTT_Shaking = "home/livingroom/smartcube/shaking";
+const char* MQTT_Surface = "home/livingroom/smartcube/surface1";
+const char* MQTT_Shaking = "home/livingroom/smartcube/shaking1";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -81,12 +81,6 @@ void loop() {
   bool lastshake = false;
   
   //getdata();
-
-  if(millis() - lastsurfaceTime > 1000) {
-    surface = getsurface();
-    sendmqtt(surface, "Ruhig");
-    lastsurfaceTime = millis();
-  }
   bool isshaked = getshake();
   if(isshaked != lastshake) 
     {
@@ -100,7 +94,26 @@ void loop() {
         }
     }
   lastshake = isshaked;
-  startdeepsleeptimer(surface);
+
+  if(millis() - lastsurfaceTime > 1000) 
+  {
+    if(isshaked == false)
+    {
+      surface = getsurface();
+      lastsurfaceTime = millis();
+    
+      if(isshaked == false)
+      {
+        sendmqtt(surface, "Ruhig");
+      }
+      else 
+      {
+        sendmqtt(surface, "Geschüttelt");
+      }
+    }
+  }
+  
+  //startdeepsleeptimer(surface);
 
   }
 
@@ -188,80 +201,59 @@ bool getshake() {
   int16_t AcY = Wire.read() << 8 | Wire.read();
   int16_t AcZ = Wire.read() << 8 | Wire.read();
 
-  static int16_t AcXold = 0;
-  static int16_t AcYold = 0;
+  static unsigned long lastreadvalues = 0;
+  static unsigned long lastshakeTime = 0;
+  static bool shaked = false;
 
-  static unsigned long lastShakeTime = 0;
-  static int shakenumber = 0;
+  static int16_t lastAcX = 0;
+  static int16_t lastAcY = 0;
+  static int16_t lastAcZ = 0;
 
-  int16_t deltax = AcX - AcXold;
-  int16_t deltay = AcY - AcYold;
+  static int angle = 10000;
 
-  bool xpos = false;
-  bool ypos = false;
-  bool xneg = false;
-  bool yneg = false;
-
-  if(deltax > 20000 && xpos == false || deltay > 20000 && ypos == false || deltay < -20000 && yneg == false || deltay < -20000 && yneg == false) 
+  if(millis() - lastreadvalues > 500 || shaked == true) 
     {
-      lastShakeTime = millis();
-      if(deltax > 20000) 
-        {
-          xpos = true;
-        }
-      else
-        {
-          xpos = false;
-        }
-      if(deltay > 20000) 
-        {
-          ypos = true;
-        }
-      else
-        {
-          ypos = false;
-        }
-      if(deltax < -20000) 
-        {
-          xneg = true;
-        }
-      else
-        {
-          xneg = false;
-        }
-      if(deltay < -20000) 
-        {
-          yneg = true;
-        }
-      else
-        {
-          yneg = false;
-        }
+      lastAcX = AcX;
+      lastAcY = AcY;
+      lastAcZ = AcZ;
+      lastreadvalues = millis();
     }
+
+  int oldamplitude = sqrt(sq(lastAcX) + sq(lastAcY) + sq(lastAcZ));
+  int amplitude = sqrt(sq(AcX) + sq(AcY) + sq(AcZ));
+   Serial.print(">");
+
+  Serial.print("amplitude:");
+  Serial.print(amplitude);
+  Serial.print(",");
+
+  Serial.print("oldamplitude:");
+  Serial.print(oldamplitude);
+  Serial.print(",");
+
+  Serial.print("border");
+  Serial.print(1000000);
+  Serial.println(" ");
   
-  if(millis() - lastShakeTime > 200) 
-    {
-      shakenumber = 0;
-      xpos = false;
-      ypos = false;
-      xneg = false;
-      yneg = false;
-    }
-  else
-    {
-      shakenumber++;
-    }
 
-    if(shakenumber > 5) 
-    {
-      return true;
-    }
-    else 
-    {
-      return false;
-    }
+  
 
 
+  if(amplitude < 20000) 
+  {
+   lastshakeTime = millis();
+   delay(100);
+  }
+
+  if(millis() - lastshakeTime > 200) 
+    {
+      shaked = true;
+    }
+  else 
+    {
+      shaked = false;
+    }
+  return shaked;
 }
 
 void getavailablewifi() {
